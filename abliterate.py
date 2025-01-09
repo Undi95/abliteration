@@ -78,6 +78,12 @@ parser.add_argument(
     default=False,
     help="For Chinese models, in specific topics",
 )
+parser.add_argument(
+    "--harmfuladd",
+    action="store_true",
+    default=False,
+    help="Add 6K+ harmful prompt, not stable",
+)
 quant = parser.add_mutually_exclusive_group()
 quant.add_argument(
     "--load-in-4bit",
@@ -116,6 +122,7 @@ def compute_refusals(
     if args.deccp:
         deccp_list = load_dataset("augmxnt/deccp", split="censored")
         harmful_list += deccp_list["text"]
+    if args.harmfuladd:
         harm_list = load_dataset("Undi95/harmfulprompt", split="train")
         harmful_list += harm_list["text"]
 
