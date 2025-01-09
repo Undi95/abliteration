@@ -6,6 +6,7 @@ from transformers import (
 )
 from argparse import ArgumentParser
 import torch
+import os
 
 parser = ArgumentParser()
 parser.add_argument(
@@ -48,6 +49,29 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
+def list_available_tensors(model_name):
+    folder = f"refusal_tensors/{model_name.replace('/', '_')}"
+    if not os.path.exists(folder):
+        return []
+    return [f for f in os.listdir(folder) if f.endswith("_refusal_dir.pt")]
+
+def parse_layer_input(input_str, num_layers):
+    layers = set()
+    try:
+        for part in input_str.split(";"):
+            if "-" in part:
+                start, end = map(int, part.split("-"))
+                if start < 1 or end >= num_layers or start > end:
+                    raise ValueError
+                layers.update(range(start, end + 1))
+            else:
+                layer = int(part)
+                if layer < 1 or layer >= num_layers:
+                    raise ValueError
+                layers.add(layer)
+    except ValueError:
+        raise ValueError("Invalid layer or range input.")
+    return sorted(layers)
 
 if __name__ == "__main__":
     if args.precision == "fp16":
@@ -84,6 +108,48 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(
         args.model, trust_remote_code=True, device_map=args.device
     )
+
+    model_name = args.model.replace("/", "_")
+    available_tensors = list_available_tensors(model_name)
+
+    if available_tensors:
+        print("Detected ablated tensors for the model.")
+        print("Available layers:")
+        for tensor in available_tensors:
+            print(f"  - {tensor}")
+
+        while True:
+            layer_input = input(
+                "Enter the layers to load (e.g., '1', '8-18', '4-12;18-20;21-22') or press Enter to skip: "
+            )
+            if not layer_input:
+                print("No ablated tensors loaded. Proceeding with a clean model.")
+                break
+
+            try:
+                num_layers = len(model.model.layers)
+                selected_layers = parse_layer_input(layer_input, num_layers)
+
+                scale_factor = input(
+                    "Enter scale factor to apply (default: 1.0): "
+                )
+                scale_factor = float(scale_factor) if scale_factor else 1.0
+
+                print("Loading and applying tensors...")
+                for layer in selected_layers:
+                    tensor_file = f"refusal_tensors/{model_name}_layer_{layer}_refusal_dir.pt"
+                    if os.path.exists(tensor_file):
+                        refusal_dir = torch.load(tensor_file)
+                        layer_weights = model.model.layers[layer].self_attn.o_proj.weight
+                        layer_weights -= scale_factor * torch.outer(refusal_dir, refusal_dir)
+                        print(f"Applied tensor to layer {layer}.")
+                    else:
+                        print(f"Tensor for layer {layer} not found. Skipping.")
+                break
+            except ValueError:
+                print("Invalid input. Please enter a valid layer or range.")
+    else:
+        print("No ablated tensors detected. Proceeding with a clean model.")
 
     conversation = []
     streamer = TextStreamer(tokenizer)
