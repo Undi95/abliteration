@@ -56,12 +56,18 @@ parser.add_argument(
     help="Scale factor for ablation. Use a negative scale-factor to encourage refusal. If abliteration is not good, try to increase it a little bit",
 )
 parser.add_argument(
-    "--scan-all", action="store_true", default=False, help="Perform calculations for all layers"
+    "--layer-fraction",
+    type=float,
+    default=None,
+    help="Fraction of layers to use for refusal_dir calculation. Cannot be used with --layer or --scan-all",
+)
+parser.add_argument(
+    "--scan-all", action="store_true", default=False, help="Perform calculations for all layers. Cannot be used with --layer or --layer-fraction"
 )
 parser.add_argument(
     "--layer",
     type=int,
-    help="Perform calculations for a specific layer. If invalid or layer 0 is specified, the script will fail with an error message listing available layers."
+    help="Perform calculations for a specific layer. Cannot be used with --layer-fraction or --scan-all. If invalid or layer 0 is specified, the script will fail with an error message listing available layers."
 )
 parser.add_argument(
     "--flash-attn", action="store_true", default=False, help="Use flash attention 2"
@@ -86,6 +92,9 @@ quant.add_argument(
     help="Load model in 8-bit precision using bitsandbytes",
 )
 args = parser.parse_args()
+
+if sum([args.scan_all, args.layer is not None, args.layer_fraction is not None]) > 1:
+    raise ValueError("Only one of --layer-fraction, --layer, or --scan-all can be used at a time.")
 
 def save_refusal_dir(refusal_dir: torch.Tensor, file_path: str):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
@@ -295,6 +304,19 @@ if __name__ == "__main__":
                 refusal_dir = compute_refusals(model, tokenizer, layer_idx)
                 save_refusal_dir(refusal_dir, tensor_file)
                 refusal_dirs[layer_idx] = refusal_dir
+    elif args.layer_fraction is not None:
+        layer_idx = int(num_layers * args.layer_fraction)
+        if layer_idx < 1 or layer_idx >= num_layers:
+            raise ValueError(f"Invalid layer fraction {args.layer_fraction}. It must correspond to a layer index between 1 and {num_layers - 1}.")
+        tensor_file = f"refusal_tensors/{args.model.replace('/', '_')}_layer_{layer_idx}_refusal_dir.pt"
+        if os.path.exists(tensor_file):
+            print(f"Loading precomputed refusal dir for layer fraction {args.layer_fraction} (layer {layer_idx}) from file...")
+            refusal_dirs[layer_idx] = load_refusal_dir(tensor_file)
+        else:
+            print(f"Computing refusal dir for layer fraction {args.layer_fraction} (layer {layer_idx})...")
+            refusal_dir = compute_refusals(model, tokenizer, layer_idx)
+            save_refusal_dir(refusal_dir, tensor_file)
+            refusal_dirs[layer_idx] = refusal_dir
 
     print("Applying refusal dirs to model...")
 
