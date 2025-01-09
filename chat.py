@@ -50,7 +50,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 def list_available_tensors(model_name):
-    folder = f"refusal_tensors/{model_name.replace('/', '_')}"
+    folder = f"refusal_tensors/"
     if not os.path.exists(folder):
         return []
     return [f for f in os.listdir(folder) if f.endswith("_refusal_dir.pt")]
@@ -140,8 +140,9 @@ if __name__ == "__main__":
                     tensor_file = f"refusal_tensors/{model_name}_layer_{layer}_refusal_dir.pt"
                     if os.path.exists(tensor_file):
                         refusal_dir = torch.load(tensor_file)
+                        refusal_dir = refusal_dir.view(-1)  # Flatten to 1D
                         layer_weights = model.model.layers[layer].self_attn.o_proj.weight
-                        layer_weights -= scale_factor * torch.outer(refusal_dir, refusal_dir)
+                        layer_weights.data -= scale_factor * torch.outer(refusal_dir, refusal_dir)
                         print(f"Applied tensor to layer {layer}.")
                     else:
                         print(f"Tensor for layer {layer} not found. Skipping.")
