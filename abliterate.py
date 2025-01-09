@@ -58,11 +58,14 @@ parser.add_argument(
 parser.add_argument(
     "--layer-fraction",
     type=float,
-    default=None,
-    help="Fraction of layers to use for refusal_dir calculation. Cannot be used with --layer or --scan-all",
+    default=1.0,
+    help="Fraction of layers to use for refusal_dir calculation. Default is 1.0. Cannot be used with --layer or --scan-all.",
 )
 parser.add_argument(
     "--scan-all", action="store_true", default=False, help="Perform calculations for all layers. Cannot be used with --layer or --layer-fraction"
+)
+parser.add_argument(
+    "--resume", action="store_true", default=False, help="Resume from previously calculated layers when using --scan-all"
 )
 parser.add_argument(
     "--layer",
@@ -99,7 +102,7 @@ quant.add_argument(
 )
 args = parser.parse_args()
 
-if sum([args.scan_all, args.layer is not None, args.layer_fraction is not None]) > 1:
+if sum([args.scan_all, args.layer is not None, args.layer_fraction != 1.0]) > 1:
     raise ValueError("Only one of --layer-fraction, --layer, or --scan-all can be used at a time.")
 
 def save_refusal_dir(refusal_dir: torch.Tensor, file_path: str):
@@ -307,10 +310,11 @@ if __name__ == "__main__":
                 print(f"Loading precomputed refusal dir for layer {layer_idx} from file...")
                 refusal_dirs[layer_idx] = load_refusal_dir(tensor_file)
             else:
-                print(f"Computing refusal dir for layer {layer_idx}...")
-                refusal_dir = compute_refusals(model, tokenizer, layer_idx)
-                save_refusal_dir(refusal_dir, tensor_file)
-                refusal_dirs[layer_idx] = refusal_dir
+                if args.resume:
+                    print(f"Resuming calculation for layer {layer_idx}...")
+                    refusal_dir = compute_refusals(model, tokenizer, layer_idx)
+                    save_refusal_dir(refusal_dir, tensor_file)
+                    refusal_dirs[layer_idx] = refusal_dir
     elif args.layer_fraction is not None:
         layer_idx = int(num_layers * args.layer_fraction)
         if layer_idx < 1 or layer_idx >= num_layers:
