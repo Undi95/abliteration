@@ -105,6 +105,7 @@ options:
   --scan-all            Perform calculations for all layers. Cannot be used with --layer or --layer-fraction
   --layer               Perform calculations for a specific layer. Cannot be used with --layer-fraction or --scan-all
   --layer-fraction      Fraction of layers to use for refusal_dir calculation. Cannot be used with --layer or --scan-all
+  --resume              Resume from previously calculated layers when using --scan-all
 ```
 
 ## Credits
