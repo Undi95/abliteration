@@ -73,6 +73,21 @@ def parse_layer_input(input_str, num_layers):
         raise ValueError("Invalid layer or range input.")
     return sorted(layers)
 
+def modify_tensor(tensor_data, refusal_dir, scale_factor):
+    if tensor_data.device != refusal_dir.device:
+        refusal_dir = refusal_dir.to(tensor_data.device)
+    tensor_float32 = tensor_data.to(torch.float32)
+    refusal_dir_float32 = refusal_dir.to(torch.float32)
+
+    # Ensure the dimensions match for broadcasting
+    if refusal_dir_float32.dim() > 1:
+        refusal_dir_float32 = refusal_dir_float32.view(-1)
+    while refusal_dir_float32.dim() < tensor_float32.dim():
+        refusal_dir_float32 = refusal_dir_float32.unsqueeze(-1)
+
+    tensor_float32 -= scale_factor * refusal_dir_float32 * refusal_dir_float32
+    return torch.nn.Parameter(tensor_float32.to(tensor_data.dtype))
+
 if __name__ == "__main__":
     if args.precision == "fp16":
         precision = torch.float16
@@ -136,16 +151,26 @@ if __name__ == "__main__":
                 scale_factor = float(scale_factor) if scale_factor else 1.0
 
                 print("Loading and applying tensors...")
-                for layer in selected_layers:
-                    tensor_file = f"refusal_tensors/{model_name}_layer_{layer}_refusal_dir.pt"
+                for layer_idx in selected_layers:
+                    tensor_file = f"refusal_tensors/{model_name}_layer_{layer_idx}_refusal_dir.pt"
                     if os.path.exists(tensor_file):
                         refusal_dir = torch.load(tensor_file)
-                        refusal_dir = refusal_dir.view(-1)  # Flatten to 1D
-                        layer_weights = model.model.layers[layer].self_attn.o_proj.weight
-                        layer_weights.data -= scale_factor * torch.outer(refusal_dir, refusal_dir)
-                        print(f"Applied tensor to layer {layer}.")
+
+                        lm_model = model.model
+
+                        lm_model.layers[layer_idx].self_attn.o_proj.weight = modify_tensor(
+                            lm_model.layers[layer_idx].self_attn.o_proj.weight.data,
+                            refusal_dir,
+                            scale_factor,
+                        )
+                        lm_model.layers[layer_idx].mlp.down_proj.weight = modify_tensor(
+                            lm_model.layers[layer_idx].mlp.down_proj.weight.data,
+                            refusal_dir,
+                            scale_factor,
+                        )
+                        print(f"Applied tensors to layer {layer_idx}.")
                     else:
-                        print(f"Tensor for layer {layer} not found. Skipping.")
+                        print(f"Tensor for layer {layer_idx} not found. Skipping.")
                 break
             except ValueError:
                 print("Invalid input. Please enter a valid layer or range.")
