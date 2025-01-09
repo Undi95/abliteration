@@ -53,19 +53,9 @@ lm_model.layers[layer_idx].mlp.down_proj.weight = modify_tensor(
 ```
 
 > Qwen series models are so stubborn that you might need to adjust parameters to make a good abliteration.
-> You can toy with that :
+> You can toy with those too :
 
 ```python
-lm_model.layers[layer_idx].self_attn.o_proj.weight = modify_tensor(
-    lm_model.layers[layer_idx].self_attn.o_proj.weight.data,
-    refusal_dir,
-    scale_factor,
-)
-lm_model.layers[layer_idx].mlp.down_proj.weight = modify_tensor(
-    lm_model.layers[layer_idx].mlp.down_proj.weight.data,
-    refusal_dir,
-    scale_factor,
-)
 lm_model.layers[layer_idx].self_attn.q_proj.weight = modify_tensor(
     lm_model.layers[layer_idx].self_attn.q_proj.weight.data,
     refusal_dir,
