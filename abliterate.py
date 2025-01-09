@@ -123,8 +123,8 @@ def compute_refusals(
         deccp_list = load_dataset("augmxnt/deccp", split="censored")
         harmful_list += deccp_list["text"]
     if args.harmfuladd:
-        harm_list = load_dataset("Undi95/harmfulprompt", split="train")
-        harmful_list += harm_list["text"]
+        df = pandas.read_parquet("./harmful-add.parquet")
+        harmful_list = df["text"].tolist()
 
     harmful_tokens = [
         tokenizer.apply_chat_template(
