@@ -13,6 +13,7 @@ from transformers import (
     PreTrainedTokenizerFast,
     PreTrainedModel,
 )
+import os
 
 parser = argparse.ArgumentParser(description="Make abliterated models")
 parser.add_argument(
@@ -49,16 +50,18 @@ parser.add_argument(
     "--skip-end", type=int, default=0, help="Number of layers to skip at the end"
 )
 parser.add_argument(
-    "--layer-fraction",
-    type=float,
-    default=1,
-    help="Fraction of layers to use for refusal_dir calculation",
-)
-parser.add_argument(
     "--scale-factor",
     type=float,
     default=1.0,
     help="Scale factor for ablation. Use a negative scale-factor to encourage refusal. If abliteration is not good, try to increase it a little bit",
+)
+parser.add_argument(
+    "--scan-all", action="store_true", default=False, help="Perform calculations for all layers"
+)
+parser.add_argument(
+    "--layer",
+    type=int,
+    help="Perform calculations for a specific layer. If invalid or layer 0 is specified, the script will fail with an error message listing available layers."
 )
 parser.add_argument(
     "--flash-attn", action="store_true", default=False, help="Use flash attention 2"
@@ -84,11 +87,18 @@ quant.add_argument(
 )
 args = parser.parse_args()
 
+def save_refusal_dir(refusal_dir: torch.Tensor, file_path: str):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    torch.save(refusal_dir, file_path)
+
+
+def load_refusal_dir(file_path: str) -> torch.Tensor:
+    return torch.load(file_path)
 
 def compute_refusals(
     model: PreTrainedModel,
     tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
-    layer_fraction: float = 0.6,
+    layer_idx: int,
 ) -> torch.Tensor:
     df = pandas.read_parquet("./harmless.parquet")
     harmless_list = df["text"].tolist()
@@ -97,6 +107,8 @@ def compute_refusals(
     if args.deccp:
         deccp_list = load_dataset("augmxnt/deccp", split="censored")
         harmful_list += deccp_list["text"]
+        harm_list = load_dataset("Undi95/harmfulprompt", split="train")
+        harmful_list += harm_list["text"]
 
     harmful_tokens = [
         tokenizer.apply_chat_template(
@@ -121,7 +133,7 @@ def compute_refusals(
     harmful_outputs = []
     harmless_outputs = []
 
-    for token in tqdm(harmful_tokens, desc="Generating harmful outputs"):
+    for token in tqdm(harmful_tokens, desc=f"Generating harmful outputs for layer {layer_idx}"):
         harmful_outputs.append(
             model.generate(
                 token.to("cpu"),
@@ -132,7 +144,7 @@ def compute_refusals(
                 pad_token_id=tokenizer.eos_token_id,
             )
         )
-    for token in tqdm(harmless_tokens, desc="Generating harmless outputs"):
+    for token in tqdm(harmless_tokens, desc=f"Generating harmless outputs for layer {layer_idx}"):
         harmless_outputs.append(
             model.generate(
                 token.to("cpu"),
@@ -147,7 +159,6 @@ def compute_refusals(
     torch.cuda.empty_cache()
     gc.collect()
 
-    layer_idx = int(len(model.model.layers) * layer_fraction)
     pos = -1
     harmful_hidden = [
         output.hidden_states[0][layer_idx][:, pos, :] for output in harmful_outputs
@@ -162,7 +173,6 @@ def compute_refusals(
     refusal_dir = refusal_dir / refusal_dir.norm()
     print(refusal_dir)
     return refusal_dir
-
 
 def modify_tensor(
     tensor_data: torch.Tensor, refusal_dir: torch.Tensor, scale_factor: float = 1.0
@@ -184,10 +194,9 @@ def modify_tensor(
 
     return torch.nn.Parameter(tensor_modified)
 
-
 def apply_abliteration(
     model: PreTrainedModel,
-    refusal_dir: torch.Tensor,
+    refusal_dirs: dict,
     skip_begin_layers: int = 1,
     skip_end_layers: int = 0,
     scale_factor: float = 1.0,
@@ -201,28 +210,26 @@ def apply_abliteration(
         range(skip_begin_layers, num_layers - skip_end_layers),
         desc="Applying abliteration",
     ):
-        lm_model.layers[layer_idx].self_attn.o_proj.weight = modify_tensor(
-            lm_model.layers[layer_idx].self_attn.o_proj.weight.data,
-            refusal_dir,
-            scale_factor,
-        )
-        lm_model.layers[layer_idx].mlp.down_proj.weight = modify_tensor(
-            lm_model.layers[layer_idx].mlp.down_proj.weight.data,
-            refusal_dir,
-            scale_factor,
-        )
+        if layer_idx in refusal_dirs:
+            refusal_dir = refusal_dirs[layer_idx]
+            lm_model.layers[layer_idx].self_attn.o_proj.weight = modify_tensor(
+                lm_model.layers[layer_idx].self_attn.o_proj.weight.data,
+                refusal_dir,
+                scale_factor,
+            )
+            lm_model.layers[layer_idx].mlp.down_proj.weight = modify_tensor(
+                lm_model.layers[layer_idx].mlp.down_proj.weight.data,
+                refusal_dir,
+                scale_factor,
+            )
 
     torch.cuda.empty_cache()
     gc.collect()
 
     return model
 
-
 if __name__ == "__main__":
     assert args.skip_begin >= 1, "Do not mess with the first layer!"
-    assert (
-        args.layer_fraction >= 0.0 and args.layer_fraction <= 1.0
-    ), "Invalid layer fraction"
     torch.inference_mode()
     torch.set_grad_enabled(False)
 
@@ -258,19 +265,40 @@ if __name__ == "__main__":
     )
     model.requires_grad_(False)
 
-    assert args.skip_begin + args.skip_end < len(
-        model.model.layers
-    ), "Too many layers to skip"
     tokenizer = AutoTokenizer.from_pretrained(
         args.model, trust_remote_code=True, device_map=args.device
     )
 
-    print("Computing refusal dir...")
-    refusal_dir = compute_refusals(model, tokenizer, args.layer_fraction)
-    print("Applying refusal dir...")
+    refusal_dirs = {}
+    num_layers = len(model.model.layers)
+
+    if args.layer is not None:
+        if args.layer < 1 or args.layer >= num_layers:
+            raise ValueError(f"Invalid layer index {args.layer}. Available layers: 1 to {num_layers - 1}.")
+        tensor_file = f"refusal_tensors/{args.model.replace('/', '_')}_layer_{args.layer}_refusal_dir.pt"
+        if os.path.exists(tensor_file):
+            print(f"Loading precomputed refusal dir for layer {args.layer} from file...")
+            refusal_dirs[args.layer] = load_refusal_dir(tensor_file)
+        else:
+            print(f"Computing refusal dir for layer {args.layer}...")
+            refusal_dir = compute_refusals(model, tokenizer, args.layer)
+            save_refusal_dir(refusal_dir, tensor_file)
+            refusal_dirs[args.layer] = refusal_dir
+    elif args.scan_all:
+        for layer_idx in range(args.skip_begin, num_layers - args.skip_end):
+            tensor_file = f"refusal_tensors/{args.model.replace('/', '_')}_layer_{layer_idx}_refusal_dir.pt"
+            if os.path.exists(tensor_file):
+                print(f"Loading precomputed refusal dir for layer {layer_idx} from file...")
+                refusal_dirs[layer_idx] = load_refusal_dir(tensor_file)
+            else:
+                print(f"Computing refusal dir for layer {layer_idx}...")
+                refusal_dir = compute_refusals(model, tokenizer, layer_idx)
+                save_refusal_dir(refusal_dir, tensor_file)
+                refusal_dirs[layer_idx] = refusal_dir
+
+    print("Applying refusal dirs to model...")
 
     if args.precision != "bf16" or args.load_in_4bit or args.load_in_8bit:
-        # WARNING: Reloading model to CPU to apply abliteration is necessary, for cuda device will add slight error to other modules such as q,k,v proj or mlp, and ends up messing up the model.
         print("Reloading model to CPU with bf16 precision...")
         del model
         torch.cuda.empty_cache()
@@ -284,7 +312,7 @@ if __name__ == "__main__":
         )
 
     model = apply_abliteration(
-        model, refusal_dir, args.skip_begin, args.skip_end, args.scale_factor
+        model, refusal_dirs, args.skip_begin, args.skip_end, args.scale_factor
     )
     print(f"Saving abliterated model to {args.output}...")
     model.save_pretrained(args.output)
