@@ -78,7 +78,8 @@ Available targets can be found in [transformers model architectures](https://git
 **Full arguments**:
 
 ```shell
-usage: abliterate.py [-h] --model MODEL [--device {auto,cuda,cpu}] --output OUTPUT [--skip-begin SKIP_BEGIN] [--skip-end SKIP_END] [--layer-fraction LAYER_FRACTION | --layer [LAYER] | --scan-all]
+usage: abliterate.py [-h] --model MODEL [--device {auto,cuda,cpu}] --output OUTPUT [--skip-begin SKIP_BEGIN] [--skip-end SKIP_END]
+                     [--layer-fraction LAYER_FRACTION | --layer [LAYER] | --scan-all]
                      [--scale-factor SCALE_FACTOR] [--flash-attn] [--deccp] [--load-in-4bit | --load-in-8bit]
 
 Make abliterated models
