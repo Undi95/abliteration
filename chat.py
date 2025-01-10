@@ -251,13 +251,23 @@ if __name__ == "__main__":
 
     conversation = []
     streamer = TextStreamer(tokenizer)
-    print("Type /clear to clear history, /scale <value> to adjust scale factor, /exit to quit.")
+    print("Type /clear to clear history, /scale <value> to adjust scale factor, /exit to quit, /save <name> to save the current model.")
 
     while True:
         prompt = input("User> ")
         if prompt == "/clear":
             conversation = []
             print("! History cleared.")
+            continue
+        elif prompt.startswith("/save"):
+            try:
+                _, save_name = prompt.split()
+                save_path = f"./{save_name}"
+                model.save_pretrained(save_path)
+                tokenizer.save_pretrained(save_path)
+                print(f"! Model saved with active modifications to: {save_path}")
+            except ValueError:
+                print("! Invalid usage. Please use: /save <name>")
             continue
         elif prompt.startswith("/scale"):
             try:
