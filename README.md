@@ -78,7 +78,7 @@ Available targets can be found in [transformers model architectures](https://git
 **Full arguments**:
 
 ```shell
-usage: abliterate.py [-h] --model MODEL [--device {auto,cuda,cpu}] --output OUTPUT [--skip-begin SKIP_BEGIN] [--skip-end SKIP_END] [--layer-fraction LAYER_FRACTION]
+usage: abliterate.py [-h] --model MODEL [--device {auto,cuda,cpu}] --output OUTPUT [--skip-begin SKIP_BEGIN] [--skip-end SKIP_END] [--layer-fraction LAYER_FRACTION | --layer [LAYER] | --scan-all]
                      [--scale-factor SCALE_FACTOR] [--flash-attn] [--deccp] [--load-in-4bit | --load-in-8bit]
 
 Make abliterated models
@@ -105,7 +105,6 @@ options:
   --scan-all            Perform calculations for all layers. Cannot be used with --layer or --layer-fraction
   --layer               Perform calculations for a specific layer. Cannot be used with --layer-fraction or --scan-all
   --layer-fraction      Fraction of layers to use for refusal_dir calculation. Cannot be used with --layer or --scan-all
-  --resume              Resume from previously calculated layers when using --scan-all
 ```
 
 ## Credits
