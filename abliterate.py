@@ -65,9 +65,6 @@ parser.add_argument(
     "--scan-all", action="store_true", default=False, help="Perform calculations for all layers. Cannot be used with --layer or --layer-fraction"
 )
 parser.add_argument(
-    "--resume", action="store_true", default=False, help="Resume from previously calculated layers when using --scan-all"
-)
-parser.add_argument(
     "--layer",
     type=int,
     help="Perform calculations for a specific layer. Cannot be used with --layer-fraction or --scan-all. If invalid or layer 0 is specified, the script will fail with an error message listing available layers."
@@ -310,7 +307,6 @@ if __name__ == "__main__":
                 print(f"Loading precomputed refusal dir for layer {layer_idx} from file...")
                 refusal_dirs[layer_idx] = load_refusal_dir(tensor_file)
             else:
-                if args.resume:
                     print(f"Resuming calculation for layer {layer_idx}...")
                     refusal_dir = compute_refusals(model, tokenizer, layer_idx)
                     save_refusal_dir(refusal_dir, tensor_file)
